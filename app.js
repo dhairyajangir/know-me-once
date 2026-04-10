@@ -680,6 +680,7 @@ const appElements = {
   quickStartSection: document.getElementById("quickStartSection"),
   selectSourceResumeBtn: document.getElementById("selectSourceResumeBtn"),
   selectSourcePortfolioBtn: document.getElementById("selectSourcePortfolioBtn"),
+  extractionCoverageHint: document.getElementById("extractionCoverageHint"),
   resumeExtractorCard: document.getElementById("resumeExtractorCard"),
   portfolioExtractorCard: document.getElementById("portfolioExtractorCard"),
   selectResumeBtn: document.getElementById("selectResumeBtn"),
@@ -739,6 +740,7 @@ function initialize() {
   bindStaticEvents();
   setInputMode(state.inputMode);
   setQuickExtractSource(state.quickExtractSource);
+  hideExtractionCoverageHint();
   updateExtractionLockUI();
   renderAll();
 }
@@ -768,6 +770,7 @@ function bindStaticEvents() {
     }
     setResumeStatus("");
     setPortfolioStatus("");
+    hideExtractionCoverageHint();
     setExtractButtonState(appElements.extractResumeBtn, "idle");
     setExtractButtonState(appElements.extractPortfolioBtn, "idle");
     clearResumePreview();
@@ -1332,6 +1335,7 @@ async function handleResumeExtractionFromSelection() {
     renderAll();
 
     setResumeStatus("File extraction complete and ready. Review and edit anything you want.");
+    showExtractionCoverageHint("file");
     setExtractButtonState(appElements.extractResumeBtn, "success");
     state.extractionSourceLock = "resume";
     updateExtractionLockUI();
@@ -1475,6 +1479,7 @@ async function handlePortfolioExtraction() {
     renderAll();
 
     setPortfolioStatus("Link extraction complete and ready. Review and edit anything you want.");
+    showExtractionCoverageHint("link");
     setExtractButtonState(appElements.extractPortfolioBtn, "success");
     state.extractionSourceLock = "portfolio";
     updateExtractionLockUI();
@@ -1490,6 +1495,20 @@ function setPortfolioStatus(message, isError = false) {
   if (!appElements.portfolioStatus) return;
   appElements.portfolioStatus.textContent = message;
   appElements.portfolioStatus.classList.toggle("error", isError);
+}
+
+function showExtractionCoverageHint(source) {
+  if (!appElements.extractionCoverageHint) return;
+  const sourceLabel = source === "link" ? "link" : "file";
+  appElements.extractionCoverageHint.textContent =
+    `Extracted details from ${sourceLabel} successfully. We recommend switching to Fill details manually to cover any uncovered details.`;
+  appElements.extractionCoverageHint.classList.remove("hidden");
+}
+
+function hideExtractionCoverageHint() {
+  if (!appElements.extractionCoverageHint) return;
+  appElements.extractionCoverageHint.textContent = "";
+  appElements.extractionCoverageHint.classList.add("hidden");
 }
 
 function setInputMode(mode) {
