@@ -1694,19 +1694,19 @@ if (require.main === module) {
   startServer();
 }
 
-module.exports = {
-  app,
-  startServer,
-  PROFILE_TEMPLATE,
-  UserFacingError,
-  normalizeWebUrl,
-  parseAndNormalizeProfileJson,
-  parseJsonFromModel,
-  extractUrls,
-  extractDeterministicSignals,
-  normalizeProfile,
-  buildHeuristicProfile,
-  blendProfilesWithWeights,
-  extractProfileForHarness,
-  normalizeExternalUrl,
-};
+app.app = app;
+app.startServer = startServer;
+app.PROFILE_TEMPLATE = PROFILE_TEMPLATE;
+app.UserFacingError = UserFacingError;
+app.normalizeWebUrl = normalizeWebUrl;
+app.parseAndNormalizeProfileJson = parseAndNormalizeProfileJson;
+app.parseJsonFromModel = parseJsonFromModel;
+app.extractUrls = extractUrls;
+app.extractDeterministicSignals = extractDeterministicSignals;
+app.normalizeProfile = normalizeProfile;
+app.buildHeuristicProfile = buildHeuristicProfile;
+app.blendProfilesWithWeights = blendProfilesWithWeights;
+app.extractProfileForHarness = extractProfileForHarness;
+app.normalizeExternalUrl = normalizeExternalUrl;
+
+module.exports = app;
