@@ -258,8 +258,17 @@ app.post("/api/extract/portfolio", async (req, res) => {
   }
 });
 
-app.get("*", (_req, res) => {
-  res.sendFile(path.join(__dirname, "index.html"));
+app.get("*", (req, res) => {
+  if (req.path.startsWith("/api/")) {
+    return res.status(404).json({ error: "Not found" });
+  }
+
+  // Do not serve index.html for asset-like paths.
+  if (path.extname(req.path)) {
+    return res.status(404).end();
+  }
+
+  return res.sendFile(path.join(__dirname, "index.html"));
 });
 
 app.use((error, _req, res, _next) => {
