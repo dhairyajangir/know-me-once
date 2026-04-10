@@ -93,7 +93,17 @@
                 <input id="resumeFileInput" type="file" accept=".pdf,.docx,.txt" hidden />
               </div>
               <section id="resumePreviewSection" class="resume-preview hidden" aria-label="Selected resume preview">
-                <p id="resumePreviewMeta" class="resume-preview-meta"></p>
+                <div class="resume-preview-head">
+                  <p id="resumePreviewMeta" class="resume-preview-meta"></p>
+                  <button
+                    id="togglePreviewSizeBtn"
+                    class="ghost-btn preview-size-btn"
+                    type="button"
+                    aria-expanded="false"
+                  >
+                    Enlarge preview
+                  </button>
+                </div>
                 <iframe id="resumePdfPreview" class="resume-preview-frame hidden" title="Resume PDF preview"></iframe>
                 <pre id="resumeTextPreview" class="resume-preview-text hidden"></pre>
               </section>
@@ -153,7 +163,24 @@
         <section id="profileView" class="profile-view"></section>
 
         <section id="jsonView" class="json-view hidden" aria-label="Structured JSON editor">
-          <label for="jsonEditor">Structured JSON</label>
+          <div class="json-head">
+            <label for="jsonEditor">Structured JSON</label>
+            <button
+              id="copyJsonBtn"
+              class="ghost-btn copy-json-btn"
+              type="button"
+              aria-label="Copy JSON response"
+              title="Copy JSON response"
+            >
+              <svg class="icon-copy" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <rect x="9" y="9" width="11" height="11" rx="2"></rect>
+                <rect x="4" y="4" width="11" height="11" rx="2"></rect>
+              </svg>
+              <svg class="icon-check" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M20 6L9 17l-5-5"></path>
+              </svg>
+            </button>
+          </div>
           <textarea id="jsonEditor" spellcheck="false"></textarea>
           <div class="json-actions">
             <button id="applyJsonBtn" class="primary-btn" type="button">Apply JSON edits</button>

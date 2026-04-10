@@ -30,6 +30,8 @@ const RATE_LIMIT_WINDOW_MS = toPositiveInt(process.env.RATE_LIMIT_WINDOW_MS, 60 
 const RATE_LIMIT_MAX = toPositiveInt(process.env.RATE_LIMIT_MAX, 50);
 const EXTRACTION_CACHE_TTL_MS = toPositiveInt(process.env.EXTRACTION_CACHE_TTL_MS, 10 * 60 * 1000);
 const PORTFOLIO_CACHE_TTL_MS = toPositiveInt(process.env.PORTFOLIO_CACHE_TTL_MS, 10 * 60 * 1000);
+const PIPELINE_HEURISTIC_WEIGHT = clampWeight(process.env.PIPELINE_HEURISTIC_WEIGHT, 1.15);
+const PIPELINE_MODEL_WEIGHT = clampWeight(process.env.PIPELINE_MODEL_WEIGHT, 1);
 
 const PROFILE_TEMPLATE = {
   identity: {
@@ -133,6 +135,40 @@ const PROFILE_COMPLETION_TOTAL = countLeafSlots(PROFILE_TEMPLATE, PROFILE_COMPLE
 
 const ALLOWED_RESUME_EXTENSIONS = new Set(["pdf", "docx", "txt", "md"]);
 const knownSocialHosts = ["linkedin.com", "lnkd.in", "github.com", "twitter.com", "x.com", "instagram.com"];
+const SECTION_KEYS = ["general", "summary", "experience", "education", "projects", "skills", "contact", "links"];
+const ROLE_HINT_REGEX =
+  /\b(student|software engineer|engineer|developer|designer|analyst|manager|consultant|intern|founder|freelancer|researcher|architect|devops|product manager)\b/i;
+const EDUCATION_HINT_REGEX = /\b(education|b\.?tech|bachelor|master|phd|college|university|school|diploma|degree|semester)\b/i;
+const PROJECT_HINT_REGEX = /\b(project|portfolio|case study|hackathon|prototype|built|developed|implemented)\b/i;
+const SKILL_CANONICAL_MAP = {
+  js: "JavaScript",
+  javascript: "JavaScript",
+  ts: "TypeScript",
+  typescript: "TypeScript",
+  node: "Node.js",
+  nodejs: "Node.js",
+  react: "React",
+  reactjs: "React",
+  next: "Next.js",
+  nextjs: "Next.js",
+  express: "Express",
+  expressjs: "Express",
+  html: "HTML",
+  css: "CSS",
+  scss: "SCSS",
+  sql: "SQL",
+  mysql: "MySQL",
+  postgresql: "PostgreSQL",
+  postgres: "PostgreSQL",
+  mongodb: "MongoDB",
+  api: "API",
+  rest: "REST",
+  graphql: "GraphQL",
+  ai: "AI",
+  ml: "ML",
+  ui: "UI",
+  ux: "UX",
+};
 
 const requestBuckets = new Map();
 const extractionCache = createTimedCache({ maxEntries: 250, ttlMs: EXTRACTION_CACHE_TTL_MS });
@@ -642,32 +678,42 @@ async function extractProfilePipeline({ sourceType, sourceLabel, text, portfolio
     };
   }
 
-  let rawProfile = null;
+  const heuristicProfile = buildHeuristicProfile({
+    sourceType,
+    text: normalizedText,
+    portfolioUrl,
+    signals,
+  });
+
+  let extractionCandidate = heuristicProfile;
   let extractionMode = "heuristic";
 
   try {
-    rawProfile = await extractProfileWithGemini({
+    const modelProfile = await extractProfileWithGemini({
       sourceType,
       sourceLabel,
       text: normalizedText,
       portfolioUrl,
       signals,
     });
-    extractionMode = "gemini";
-  } catch (error) {
-    rawProfile = buildHeuristicProfile({
-      sourceType,
-      text: normalizedText,
-      portfolioUrl,
-      signals,
+
+    extractionCandidate = blendProfilesWithWeights({
+      heuristicProfile,
+      modelProfile,
+      heuristicWeight: PIPELINE_HEURISTIC_WEIGHT,
+      modelWeight: PIPELINE_MODEL_WEIGHT,
     });
+    extractionMode = "blended";
+  } catch (error) {
+    extractionCandidate = heuristicProfile;
   }
 
-  const profile = normalizeProfile(rawProfile, {
+  const profile = normalizeProfile(extractionCandidate, {
     sourceType,
     portfolioUrl,
     signals,
     originalText: normalizedText,
+    extractionScope: true,
   });
 
   const result = {
@@ -731,6 +777,7 @@ function buildExtractionPrompt({ sourceType, sourceLabel, text, portfolioUrl, si
   const clippedText = prepareModelInputText(text, signals);
   const repeatCount = Math.max(1, Math.min(3, Math.round(clampWeight(promptSignalWeight, 1) * 2)));
   const repeatedSignals = Array.from({ length: repeatCount }, () => JSON.stringify(signals, null, 2)).join("\n");
+  const sectionDigest = renderSectionDigestForPrompt(signals.sections);
 
   return [
     "You are an expert identity-profile extraction assistant.",
@@ -744,13 +791,22 @@ function buildExtractionPrompt({ sourceType, sourceLabel, text, portfolioUrl, si
     "High-confidence extracted signals from deterministic parser:",
     repeatedSignals,
     "",
+    "Detected section split (heuristic parser):",
+    sectionDigest || "No clear section headings detected.",
+    "",
     "Strict rules:",
     "- Do not invent facts.",
     "- Keep missing fields as empty string or empty array.",
     "- Infer context.primaryRole as one of: student, professional, freelancer, founder, explorer.",
     "- Keep values concise and readable.",
+    "- identity.background must be a short personal summary only. Never include emails, phones, URLs, or skills lists.",
+    "- experience.education.program must only contain education details (degree/institute/year). Do not place project text here.",
+    "- experience.projects.* must only contain project details and project links.",
+    "- experience.work.currentRole must be a role title or role line (for example: Student, Software Engineer, Founder).",
+    "- capability.coreSkills and capability.activeSkills must be skill names only (comma-separated), not headings.",
     "- Link mapping must be exact: linkedin -> identity.socials.linkedin, github -> identity.socials.github, website -> identity.socials.website, twitter/x -> identity.socials.twitter, instagram -> identity.socials.instagram.",
     "- Preserve links if they exist in source text.",
+    "- This is extraction phase only: keep intent.*, behavior.*, and preferences.* empty unless explicitly stated in source text.",
     "",
     "Extract from this source text:",
     clippedText,
@@ -787,6 +843,19 @@ function prepareModelInputText(text, signals) {
     priorityLines.unshift(`Detected phones: ${signals.phones.join(", ")}`);
   }
 
+  if (signals.skillTokens && signals.skillTokens.length) {
+    priorityLines.unshift(`Detected skills: ${signals.skillTokens.join(", ")}`);
+  }
+
+  if (signals.sections && typeof signals.sections === "object") {
+    SECTION_KEYS.forEach((sectionKey) => {
+      const content = cleanString(signals.sections[sectionKey] || "");
+      if (!content) return;
+      const snippetLimit = sectionKey === "general" ? 320 : 220;
+      priorityLines.push(`[section:${sectionKey}] ${clipText(content, snippetLimit)}`);
+    });
+  }
+
   const deduped = [];
   const seen = new Set();
   for (const line of [...priorityLines, ...lines]) {
@@ -798,6 +867,21 @@ function prepareModelInputText(text, signals) {
   }
 
   return deduped.join("\n").slice(0, MAX_MODEL_TEXT_CHARS);
+}
+
+function renderSectionDigestForPrompt(sections) {
+  if (!sections || typeof sections !== "object") {
+    return "";
+  }
+
+  return SECTION_KEYS.map((sectionKey) => {
+    const value = cleanString(sections[sectionKey] || "");
+    if (!value) return "";
+    const maxChars = sectionKey === "general" ? 360 : 240;
+    return `${sectionKey.toUpperCase()}: ${clipText(value, maxChars)}`;
+  })
+    .filter(Boolean)
+    .join("\n");
 }
 
 function parseJsonFromModel(raw) {
@@ -830,6 +914,7 @@ function parseJsonFromModel(raw) {
 
 function buildHeuristicProfile({ sourceType, text, portfolioUrl, signals }) {
   const base = deepClone(PROFILE_TEMPLATE);
+  const sections = signals.sections || splitTextIntoSections(text);
 
   base.identity.contact.email = signals.emails[0] || "";
   base.identity.contact.phone = signals.phones[0] || "";
@@ -851,25 +936,27 @@ function buildHeuristicProfile({ sourceType, text, portfolioUrl, signals }) {
     base.identity.location = guessedLocation;
   }
 
-  base.identity.background = compactSummary(text, 360);
+  base.identity.background = deriveBackgroundSummary({ text, sections });
   base.context.currentFocus = sourceType === "resume" ? "Extracted from resume" : "Extracted from portfolio";
-  base.capability.coreSkills = inferSkillSummary(text);
+  base.capability.coreSkills = inferSkillSummary(text, sections);
   base.capability.activeSkills = base.capability.coreSkills;
 
+  const sectionProjects = extractProjectSectionSummary(sections);
   const projectLinks = formatProjectLinks(signals.urls, base.identity.socials, portfolioUrl);
-  if (projectLinks) {
-    base.experience.projects.portfolioHighlight = projectLinks;
-    base.experience.projects.studentProjects = projectLinks;
+  const mergedProjects = uniqueStrings([sectionProjects, projectLinks].filter(Boolean)).join(" | ");
+  if (mergedProjects) {
+    base.experience.projects.portfolioHighlight = compactSummary(mergedProjects, 320);
+    base.experience.projects.studentProjects = compactSummary(mergedProjects, 320);
   }
 
-  const lineWithEducation = findLineWithKeyword(text, /(education|university|college|btech|b\.?e\.?|master|bachelor)/i);
-  if (lineWithEducation) {
-    base.experience.education.program = lineWithEducation;
+  const educationProgram = extractEducationProgramText({ text, sections });
+  if (educationProgram) {
+    base.experience.education.program = educationProgram;
   }
 
-  const lineWithRole = findLineWithKeyword(text, /(engineer|developer|designer|analyst|manager|consultant|intern|founder|freelancer)/i);
-  if (lineWithRole) {
-    base.experience.work.currentRole = lineWithRole;
+  const currentRole = extractCurrentRoleText({ sourceType, text, sections });
+  if (currentRole) {
+    base.experience.work.currentRole = currentRole;
   }
 
   base.context.primaryRole = classifyPathFromText(text);
@@ -877,37 +964,39 @@ function buildHeuristicProfile({ sourceType, text, portfolioUrl, signals }) {
   return base;
 }
 
-function normalizeProfile(candidate, { sourceType, portfolioUrl, signals, originalText }) {
+function normalizeProfile(candidate, { sourceType, portfolioUrl, signals, originalText, extractionScope = false }) {
+  const safeSignals = signals || getEmptySignals(portfolioUrl);
+  const sectionMap = safeSignals.sections || splitTextIntoSections(originalText);
   const base = deepClone(PROFILE_TEMPLATE);
   mergeKnownKeys(base, candidate || {});
 
   base.identity.languages = normalizeLanguages(base.identity.languages);
-  if (!base.identity.languages.length && signals.languages.length) {
-    base.identity.languages = [...signals.languages];
+  if (!base.identity.languages.length && safeSignals.languages.length) {
+    base.identity.languages = [...safeSignals.languages];
   }
 
-  base.identity.contact.email = normalizeEmail(base.identity.contact.email) || signals.emails[0] || "";
-  base.identity.contact.phone = normalizePhone(base.identity.contact.phone) || signals.phones[0] || "";
+  base.identity.contact.email = normalizeEmail(base.identity.contact.email) || safeSignals.emails[0] || "";
+  base.identity.contact.phone = normalizePhone(base.identity.contact.phone) || safeSignals.phones[0] || "";
 
   base.identity.socials.linkedin = firstNonEmpty(
     normalizeSocialField("linkedin", base.identity.socials.linkedin),
-    signals.socials.linkedin
+    safeSignals.socials.linkedin
   );
   base.identity.socials.github = firstNonEmpty(
     normalizeSocialField("github", base.identity.socials.github),
-    signals.socials.github
+    safeSignals.socials.github
   );
   base.identity.socials.twitter = firstNonEmpty(
     normalizeSocialField("twitter", base.identity.socials.twitter),
-    signals.socials.twitter
+    safeSignals.socials.twitter
   );
   base.identity.socials.instagram = firstNonEmpty(
     normalizeSocialField("instagram", base.identity.socials.instagram),
-    signals.socials.instagram
+    safeSignals.socials.instagram
   );
   base.identity.socials.website = firstNonEmpty(
     normalizeSocialField("website", base.identity.socials.website),
-    signals.socials.website,
+    safeSignals.socials.website,
     portfolioUrl
   );
 
@@ -927,20 +1016,51 @@ function normalizeProfile(candidate, { sourceType, portfolioUrl, signals, origin
     base.context.currentFocus = sourceType === "resume" ? "Extracted from resume" : "Extracted from portfolio";
   }
 
-  if (!base.capability.coreSkills) {
-    base.capability.coreSkills = inferSkillSummary(originalText);
-  }
+  base.identity.background = normalizeBackgroundValue(base.identity.background, {
+    originalText,
+    sections: sectionMap,
+    signals: safeSignals,
+  });
 
-  if (!base.capability.activeSkills && base.capability.coreSkills) {
-    base.capability.activeSkills = base.capability.coreSkills;
-  }
+  const inferredSkills = inferSkillSummary(originalText, sectionMap);
+  base.capability.coreSkills = normalizeSkillSummary(firstNonEmpty(base.capability.coreSkills, inferredSkills));
+  base.capability.activeSkills = normalizeSkillSummary(firstNonEmpty(base.capability.activeSkills, base.capability.coreSkills));
+
+  base.experience.education.program = normalizeEducationProgram(base.experience.education.program, {
+    originalText,
+    sections: sectionMap,
+  });
+
+  base.experience.work.currentRole = normalizeCurrentRole(base.experience.work.currentRole, {
+    sourceType,
+    originalText,
+    sections: sectionMap,
+  });
+
+  const normalizedProjectSummary = buildProjectSummary({
+    existingValue: firstNonEmpty(base.experience.projects.portfolioHighlight, base.experience.projects.studentProjects),
+    sections: sectionMap,
+    urls: safeSignals.urls,
+    socials: base.identity.socials,
+    portfolioUrl,
+  });
 
   if (!base.experience.projects.portfolioHighlight) {
-    base.experience.projects.portfolioHighlight = formatProjectLinks(signals.urls, base.identity.socials, portfolioUrl);
+    base.experience.projects.portfolioHighlight = normalizedProjectSummary;
+  } else {
+    base.experience.projects.portfolioHighlight = compactSummary(base.experience.projects.portfolioHighlight, 320);
   }
 
-  if (!base.experience.projects.studentProjects && base.experience.projects.portfolioHighlight) {
-    base.experience.projects.studentProjects = base.experience.projects.portfolioHighlight;
+  if (!base.experience.projects.studentProjects) {
+    base.experience.projects.studentProjects = normalizedProjectSummary;
+  } else {
+    base.experience.projects.studentProjects = compactSummary(base.experience.projects.studentProjects, 320);
+  }
+
+  if (extractionScope) {
+    base.intent = deepClone(PROFILE_TEMPLATE.intent);
+    base.behavior = deepClone(PROFILE_TEMPLATE.behavior);
+    base.preferences = deepClone(PROFILE_TEMPLATE.preferences);
   }
 
   base.context.primaryRole = normalizePrimaryRole(base.context.primaryRole || classifyRoleFromProfile(base));
@@ -966,6 +1086,8 @@ function getEmptySignals(portfolioUrl = "") {
       instagram: "",
     },
     languages: [],
+    sections: createEmptySectionMap(),
+    skillTokens: [],
   };
 }
 
@@ -1041,6 +1163,7 @@ async function extractProfileForHarness({
       portfolioUrl: safePortfolioUrl,
       signals,
       originalText: normalizedText,
+      extractionScope: true,
     }),
     extractionMode: modelProfile ? "blended" : "heuristic",
     modelAvailable: Boolean(modelProfile),
@@ -1183,8 +1306,289 @@ function mergeKnownKeys(target, source) {
   });
 }
 
+function createEmptySectionMap() {
+  return Object.fromEntries(SECTION_KEYS.map((key) => [key, ""]));
+}
+
+function splitToLines(text) {
+  return String(text || "")
+    .split("\n")
+    .map((line) => cleanString(line))
+    .filter(Boolean);
+}
+
+function detectSectionKeyFromLabel(label) {
+  const normalized = cleanString(label)
+    .toLowerCase()
+    .replace(/[^a-z\s&/.-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) return "";
+  if (/\b(summary|about|profile|objective|overview)\b/.test(normalized)) return "summary";
+  if (/\b(experience|employment|work history|professional experience)\b/.test(normalized)) return "experience";
+  if (/\b(education|academic|academics|qualification)\b/.test(normalized)) return "education";
+  if (/\b(project|projects|case study|case studies|portfolio work|work samples)\b/.test(normalized)) return "projects";
+  if (/\b(skill|skills|technical skill|tech stack|technologies|tools|expertise)\b/.test(normalized)) return "skills";
+  if (/\b(contact|reach|personal details)\b/.test(normalized)) return "contact";
+  if (/\b(link|links|social|profiles?)\b/.test(normalized)) return "links";
+  return "";
+}
+
+function splitTextIntoSections(text) {
+  const buckets = Object.fromEntries(SECTION_KEYS.map((key) => [key, []]));
+  let activeSection = "general";
+
+  splitToLines(text).forEach((line) => {
+    const inlineMatch = line.match(/^([A-Za-z][A-Za-z &/().-]{1,40})\s*[:|-]\s*(.+)$/);
+    if (inlineMatch) {
+      const inlineSection = detectSectionKeyFromLabel(inlineMatch[1]);
+      if (inlineSection) {
+        activeSection = inlineSection;
+        buckets[activeSection].push(cleanString(inlineMatch[2]));
+        return;
+      }
+    }
+
+    const detectedSection = detectSectionKeyFromLabel(line);
+    const isLikelyHeading = line.length <= 42 && !/[:|\-]/.test(line) && line.split(/\s+/).length <= 5;
+    if (detectedSection && isLikelyHeading) {
+      activeSection = detectedSection;
+      return;
+    }
+
+    buckets[activeSection].push(line);
+  });
+
+  return Object.fromEntries(
+    SECTION_KEYS.map((sectionKey) => [sectionKey, buckets[sectionKey].join("\n").trim()])
+  );
+}
+
+function getSectionLines(sections, key, limit = Number.POSITIVE_INFINITY) {
+  const lines = splitToLines(sections && sections[key]);
+  if (!Number.isFinite(limit) || limit <= 0) {
+    return lines;
+  }
+  return lines.slice(0, limit);
+}
+
+function isLikelyContactOrLinkLine(line) {
+  const value = cleanString(line);
+  if (!value) return false;
+  return /@|https?:\/\/|www\.|\b(linkedin|github|instagram|twitter|x\.com|phone|email|contact)\b/i.test(value);
+}
+
+function isLikelySkillListLine(line) {
+  const value = cleanString(line);
+  if (!value) return false;
+  if (/\b(skills?|tech stack|tools?|technologies?)\b/i.test(value)) return true;
+  const chunks = value.split(/[,|/]+/).map((entry) => cleanString(entry)).filter(Boolean);
+  return chunks.length >= 4 && chunks.every((entry) => entry.split(/\s+/).length <= 3);
+}
+
+function deriveBackgroundSummary({ text, sections }) {
+  const summaryCandidates = [
+    ...getSectionLines(sections, "summary", 3),
+    ...getSectionLines(sections, "general", 6),
+  ];
+
+  for (const line of summaryCandidates) {
+    if (isLikelyContactOrLinkLine(line)) continue;
+    if (isLikelySkillListLine(line)) continue;
+    if (line.split(/\s+/).length < 6) continue;
+    return compactSummary(line, 240);
+  }
+
+  const fallback = getSectionLines(sections, "general", 4)
+    .filter((line) => !isLikelyContactOrLinkLine(line))
+    .join(" ");
+
+  return compactSummary(fallback || text, 240);
+}
+
+function extractEducationProgramText({ text, sections }) {
+  const candidates = [
+    ...getSectionLines(sections, "education", 6),
+    ...splitToLines(text).filter((line) => EDUCATION_HINT_REGEX.test(line)).slice(0, 5),
+  ];
+
+  for (const rawLine of candidates) {
+    const line = cleanString(rawLine.replace(/^education\s*[:|-]\s*/i, ""));
+    if (!line) continue;
+    if (!EDUCATION_HINT_REGEX.test(line) && line.split(/\s+/).length < 3) continue;
+    if (PROJECT_HINT_REGEX.test(line) && !EDUCATION_HINT_REGEX.test(line)) continue;
+    return compactSummary(line, 160);
+  }
+
+  return "";
+}
+
+function extractRoleFromLine(rawLine) {
+  let line = cleanString(rawLine);
+  if (!line) return "";
+
+  line = line.replace(/^(experience|role|current role|position|title)\s*[:|-]\s*/i, "").trim();
+  if (!line) return "";
+  if (!ROLE_HINT_REGEX.test(line)) return "";
+  if (/^(passionate|seeking|objective|summary|profile)\b/i.test(line)) return "";
+
+  const wordCount = line.split(/\s+/).length;
+  if (wordCount > 16 && !/\bat\b/i.test(line)) {
+    return "";
+  }
+
+  if (line.length > 120) {
+    line = line.slice(0, 120).trim();
+  }
+
+  return line;
+}
+
+function extractCurrentRoleText({ sourceType, text, sections }) {
+  const candidates = [
+    ...getSectionLines(sections, "experience", 6),
+    ...getSectionLines(sections, "summary", 4),
+    ...getSectionLines(sections, "general", 8),
+    ...splitToLines(text).slice(0, 12),
+  ];
+
+  for (const candidate of candidates) {
+    const role = extractRoleFromLine(candidate);
+    if (role) return role;
+  }
+
+  return sourceType === "resume" && /\bstudent\b/i.test(text) ? "Student" : "";
+}
+
+function extractProjectSectionSummary(sections) {
+  const lines = getSectionLines(sections, "projects", 5);
+  if (!lines.length) {
+    return "";
+  }
+  return compactSummary(lines.join(" | "), 320);
+}
+
+function buildProjectSummary({ existingValue, sections, urls, socials, portfolioUrl }) {
+  const sectionProjects = extractProjectSectionSummary(sections);
+  const projectLinks = formatProjectLinks(urls || [], socials || {}, portfolioUrl || "");
+  const candidate = uniqueStrings([existingValue, sectionProjects, projectLinks].filter(Boolean)).join(" | ");
+  return compactSummary(candidate, 320);
+}
+
+function normalizeBackgroundValue(value, { originalText, sections, signals }) {
+  const cleaned = cleanString(value);
+  const likelyNoisy =
+    !cleaned ||
+    isLikelyContactOrLinkLine(cleaned) ||
+    isLikelySkillListLine(cleaned) ||
+    (cleaned.split(/\s+/).length > 60 && /\b(project|education|skills)\b/i.test(cleaned));
+
+  const source = likelyNoisy ? deriveBackgroundSummary({ text: originalText, sections }) : cleaned;
+  const withoutSignals = cleanString(
+    source
+      .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "")
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/\b(?:www\.)?linkedin\.com\S*/gi, "")
+      .replace(/\b(?:www\.)?github\.com\S*/gi, "")
+  );
+
+  const compact = compactSummary(withoutSignals, 240);
+  if (compact) {
+    return compact;
+  }
+
+  if (signals && signals.urls && signals.urls.length) {
+    return "";
+  }
+
+  return compactSummary(cleaned, 240);
+}
+
+function normalizeEducationProgram(value, { originalText, sections }) {
+  const cleaned = cleanString(value);
+  const fallback = extractEducationProgramText({ text: originalText, sections });
+
+  if (!cleaned) {
+    return fallback;
+  }
+
+  if (PROJECT_HINT_REGEX.test(cleaned) && !EDUCATION_HINT_REGEX.test(cleaned)) {
+    return fallback;
+  }
+
+  if (cleaned.split(/\s+/).length > 26 && fallback) {
+    return fallback;
+  }
+
+  return compactSummary(cleaned, 160);
+}
+
+function normalizeCurrentRole(value, { sourceType, originalText, sections }) {
+  const direct = extractRoleFromLine(value);
+  if (direct) {
+    return direct;
+  }
+
+  return extractCurrentRoleText({ sourceType, text: originalText, sections });
+}
+
+function normalizeSkillSummary(value) {
+  const tokens = splitToList(value)
+    .map((entry) => normalizeSkillToken(entry))
+    .filter(Boolean);
+  return uniqueStrings(tokens).join(", ");
+}
+
+function extractSkillTokensFromSections(text, sections) {
+  const skillLines = [
+    ...getSectionLines(sections, "skills", 10),
+    ...splitToLines(text).filter((line) => /\b(skills?|tech stack|technologies|tools?|expertise)\b/i.test(line)),
+  ];
+
+  const tokens = [];
+  skillLines.forEach((line) => {
+    const payload = line.replace(/^(technical\s+)?(skills?|tech stack|technologies|tools?|expertise)\s*[:|-]\s*/i, "");
+    splitToList(payload).forEach((token) => {
+      const normalized = normalizeSkillToken(token);
+      if (normalized) {
+        tokens.push(normalized);
+      }
+    });
+  });
+
+  return uniqueStrings(tokens);
+}
+
+function normalizeSkillToken(value) {
+  const cleaned = cleanString(value).replace(/[()]/g, "");
+  if (!cleaned) return "";
+  if (/^(technical\s+)?skills?$/i.test(cleaned)) return "";
+  if (cleaned.length > 36) return "";
+
+  const key = cleaned.toLowerCase().replace(/[^a-z0-9+#.]/g, "");
+  if (SKILL_CANONICAL_MAP[key]) {
+    return SKILL_CANONICAL_MAP[key];
+  }
+
+  if (/^[A-Z0-9.+#-]{2,8}$/.test(cleaned)) {
+    return cleaned.toUpperCase();
+  }
+
+  return cleaned
+    .split(" ")
+    .map((entry) => {
+      if (!entry) return "";
+      if (/^[A-Z0-9.+#-]{2,8}$/.test(entry)) return entry.toUpperCase();
+      return entry[0].toUpperCase() + entry.slice(1).toLowerCase();
+    })
+    .join(" ")
+    .trim();
+}
+
 function extractDeterministicSignals(text, portfolioUrl) {
   const normalizedText = normalizeText(text);
+  const sections = splitTextIntoSections(normalizedText);
 
   const emails = uniqueStrings(
     (normalizedText.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [])
@@ -1200,12 +1604,20 @@ function extractDeterministicSignals(text, portfolioUrl) {
 
   const urls = uniqueStrings(extractUrls(normalizedText).map((entry) => normalizeExternalUrl(entry)).filter(Boolean));
   const socials = mapSocialUrls(urls);
+  const socialHandles = extractSocialHandlesFromText(normalizedText);
+
+  socials.linkedin = firstNonEmpty(socials.linkedin, normalizeSocialField("linkedin", socialHandles.linkedin));
+  socials.github = firstNonEmpty(socials.github, normalizeSocialField("github", socialHandles.github));
+  socials.twitter = firstNonEmpty(socials.twitter, normalizeSocialField("twitter", socialHandles.twitter));
+  socials.instagram = firstNonEmpty(socials.instagram, normalizeSocialField("instagram", socialHandles.instagram));
+  socials.website = firstNonEmpty(socials.website, normalizeSocialField("website", socialHandles.website));
 
   if (portfolioUrl && !socials.website) {
     socials.website = normalizeExternalUrl(portfolioUrl);
   }
 
   const languages = detectLanguages(normalizedText);
+  const skillTokens = extractSkillTokensFromSections(normalizedText, sections);
 
   return {
     emails,
@@ -1213,6 +1625,8 @@ function extractDeterministicSignals(text, portfolioUrl) {
     urls,
     socials,
     languages,
+    sections,
+    skillTokens,
   };
 }
 
@@ -1322,6 +1736,22 @@ function mapSocialUrls(urls) {
   });
 
   return socials;
+}
+
+function extractSocialHandlesFromText(text) {
+  const input = String(text || "");
+  const readLabeledValue = (labelPattern) => {
+    const match = input.match(new RegExp(`${labelPattern}\\s*[:|-]\\s*([^\\n]+)`, "i"));
+    return match && match[1] ? cleanString(match[1].split(/[|,]/)[0]) : "";
+  };
+
+  return {
+    linkedin: readLabeledValue("linkedin"),
+    github: readLabeledValue("github"),
+    twitter: readLabeledValue("(?:twitter|x)"),
+    instagram: readLabeledValue("instagram"),
+    website: readLabeledValue("(?:website|portfolio|site)"),
+  };
 }
 
 function hostnameMatches(hostname, allowedDomains) {
@@ -1489,10 +1919,17 @@ function guessLocationFromText(text) {
   return cityMatch ? cleanString(cityMatch[0]) : "";
 }
 
-function inferSkillSummary(text) {
+function inferSkillSummary(text, sections = null) {
+  const sectionMap = sections || splitTextIntoSections(text);
+  const tokens = extractSkillTokensFromSections(text, sectionMap);
+  if (tokens.length) {
+    return tokens.join(", ");
+  }
+
   const skillLine = findLineWithKeyword(text, /(skills|tech stack|tools|technology|expertise)/i);
   if (skillLine) {
-    return compactSummary(skillLine, 220);
+    const cleanedLine = skillLine.replace(/^(technical\s+)?(skills?|tech stack|tools?|technology|expertise)\s*[:|-]\s*/i, "");
+    return normalizeSkillSummary(cleanedLine);
   }
 
   return "";

@@ -273,15 +273,55 @@ h1 {
 }
 
 .extract-coverage-hint {
-  width: fit-content;
+  position: relative;
+  width: 100%;
   max-width: 100%;
-  padding: 8px 10px;
-  border: 1px solid #b9ddd6;
-  border-radius: 10px;
-  background: #edf9f7;
-  color: #0a5f57;
-  font-size: 12px;
-  line-height: 1.4;
+  padding: 11px 13px 11px 54px;
+  border: 1.5px solid #6fb9ad;
+  border-left: 6px solid var(--accent);
+  border-radius: 12px;
+  background: #f2fbf8;
+  color: #073f39;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 0.005em;
+  box-shadow: 0 2px 0 rgba(15, 118, 110, 0.12);
+}
+
+.extract-coverage-hint::before {
+  content: "TIP";
+  position: absolute;
+  left: 11px;
+  top: 10px;
+  min-width: 30px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #11796f;
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-align: center;
+}
+
+.extract-coverage-hint.is-emphasis {
+  animation: hint-pulse 900ms ease 1;
+}
+
+@keyframes hint-pulse {
+  0% {
+    transform: translateY(0);
+    border-color: #6fb9ad;
+  }
+  50% {
+    transform: translateY(-1px);
+    border-color: #1b8f83;
+  }
+  100% {
+    transform: translateY(0);
+    border-color: #6fb9ad;
+  }
 }
 
 .quick-source-option {
@@ -344,10 +384,23 @@ h1 {
   gap: 8px;
 }
 
+.resume-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .resume-preview-meta {
   font-size: 12px;
   color: #344256;
   font-weight: 600;
+}
+
+.preview-size-btn {
+  padding: 6px 10px;
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .resume-preview-frame {
@@ -356,6 +409,10 @@ h1 {
   border: 1px solid #d3ccb9;
   border-radius: 8px;
   background: #fff;
+}
+
+.resume-preview.is-expanded .resume-preview-frame {
+  min-height: 70vh;
 }
 
 .resume-preview-text {
@@ -370,6 +427,10 @@ h1 {
   max-height: 180px;
   overflow: auto;
   white-space: pre-wrap;
+}
+
+.resume-preview.is-expanded .resume-preview-text {
+  max-height: 44vh;
 }
 
 .extract-btn {
@@ -722,9 +783,55 @@ button {
   gap: 8px;
 }
 
+.json-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .json-view label {
   font-size: 13px;
   font-weight: 600;
+}
+
+.copy-json-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-color: #c8c1b2;
+  background: #fff;
+  color: #374151;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.copy-json-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+}
+
+.copy-json-btn .icon-check {
+  display: none;
+}
+
+.copy-json-btn.is-copied {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.copy-json-btn.is-copied .icon-copy {
+  display: none;
+}
+
+.copy-json-btn.is-copied .icon-check {
+  display: block;
 }
 
 #jsonEditor {
@@ -780,5 +887,18 @@ button {
 
   .history-list {
     max-height: 40vh;
+  }
+
+  .resume-preview-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .resume-preview.is-expanded .resume-preview-frame {
+    min-height: 56vh;
+  }
+
+  .resume-preview.is-expanded .resume-preview-text {
+    max-height: 38vh;
   }
 }

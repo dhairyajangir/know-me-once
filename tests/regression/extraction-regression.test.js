@@ -5,6 +5,8 @@ const {
   UserFacingError,
   normalizeWebUrl,
   extractDeterministicSignals,
+  buildHeuristicProfile,
+  normalizeProfile,
   parseAndNormalizeProfileJson,
   parseJsonFromModel,
 } = require("../../server");
@@ -82,4 +84,88 @@ test("JSON parser recovers from fenced and trailing-comma output", () => {
 
   assert.equal(parsed.identity.fullName, "Alex Example");
   assert.equal(parsed.context.primaryRole, "professional");
+});
+
+test("Section-aware heuristic keeps education and projects separated", () => {
+  const text = [
+    "Dhairya Jangir",
+    "SUMMARY",
+    "Passionate full-stack web developer with a focus on clean UI and performance.",
+    "EXPERIENCE",
+    "Software Engineer Intern at Acme Labs",
+    "EDUCATION",
+    "B.Tech Computer Science, 2026",
+    "PROJECTS",
+    "Built a campus placement analytics dashboard with React and Node.js",
+    "TECHNICAL SKILLS",
+    "javascript, nodejs, react, sql",
+  ].join("\n");
+
+  const signals = extractDeterministicSignals(text, "");
+  const profile = buildHeuristicProfile({
+    sourceType: "resume",
+    text,
+    portfolioUrl: "",
+    signals,
+  });
+
+  assert.match(profile.experience.education.program, /B\.Tech Computer Science/i);
+  assert.equal(/placement analytics dashboard/i.test(profile.experience.education.program), false);
+  assert.match(profile.experience.projects.studentProjects, /placement analytics dashboard/i);
+  assert.equal(/Passionate full-stack web developer/i.test(profile.experience.work.currentRole), false);
+  assert.match(profile.experience.work.currentRole, /Software Engineer Intern/i);
+});
+
+test("Labeled social handles normalize to canonical URLs", () => {
+  const text = [
+    "GitHub: dhairyajangir",
+    "LinkedIn: dhairya-jangir",
+    "Website: dhairyajangir.dev",
+  ].join("\n");
+
+  const signals = extractDeterministicSignals(text, "");
+
+  assert.equal(signals.socials.github, "https://github.com/dhairyajangir");
+  assert.equal(signals.socials.linkedin, "https://www.linkedin.com/in/dhairya-jangir");
+  assert.equal(signals.socials.website, "https://dhairyajangir.dev/");
+});
+
+test("Extraction scope drops non-resume-native fields and normalizes skills", () => {
+  const text = [
+    "Aisha Khan",
+    "Skills: javascript, nodejs, react, sql",
+    "Education: B.Tech Information Technology",
+  ].join("\n");
+
+  const signals = extractDeterministicSignals(text, "");
+  const profile = normalizeProfile(
+    {
+      capability: {
+        coreSkills: "TECHNICAL SKILLS, javascript, nodejs, react, sql",
+      },
+      intent: {
+        shortTerm: "Land a dream role in 3 months",
+      },
+      behavior: {
+        workStyle: "fast and flexible",
+      },
+      preferences: {
+        interests: "building SaaS products",
+      },
+    },
+    {
+      sourceType: "resume",
+      portfolioUrl: "",
+      signals,
+      originalText: text,
+      extractionScope: true,
+    }
+  );
+
+  assert.equal(profile.intent.shortTerm, "");
+  assert.equal(profile.behavior.workStyle, "");
+  assert.equal(profile.preferences.interests, "");
+  assert.equal(profile.capability.coreSkills.includes("JavaScript"), true);
+  assert.equal(profile.capability.coreSkills.includes("Node.js"), true);
+  assert.equal(profile.capability.coreSkills.includes("React"), true);
 });

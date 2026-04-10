@@ -669,6 +669,11 @@ const PROFILE_TEMPLATES = {
   },
 };
 
+const APP_STATE_STORAGE_KEY = "adaptiveIdentityState.v1";
+const APP_STATE_STORAGE_VERSION = 1;
+const STATE_PERSIST_DELAY_MS = 140;
+let persistStateTimer = null;
+
 const appElements = {
   app: document.getElementById("app"),
   resultSidebarToggleBtn: document.getElementById("resultSidebarToggleBtn"),
@@ -688,6 +693,7 @@ const appElements = {
   resumeFileInput: document.getElementById("resumeFileInput"),
   resumePreviewSection: document.getElementById("resumePreviewSection"),
   resumePreviewMeta: document.getElementById("resumePreviewMeta"),
+  togglePreviewSizeBtn: document.getElementById("togglePreviewSizeBtn"),
   resumePdfPreview: document.getElementById("resumePdfPreview"),
   resumeTextPreview: document.getElementById("resumeTextPreview"),
   resumeStatus: document.getElementById("resumeStatus"),
@@ -705,6 +711,7 @@ const appElements = {
   jsonStatus: document.getElementById("jsonStatus"),
   applyJsonBtn: document.getElementById("applyJsonBtn"),
   formatJsonBtn: document.getElementById("formatJsonBtn"),
+  copyJsonBtn: document.getElementById("copyJsonBtn"),
   viewProfileBtn: document.getElementById("viewProfileBtn"),
   viewJsonBtn: document.getElementById("viewJsonBtn"),
 };
@@ -726,6 +733,15 @@ const state = {
   extractionSourceLock: null,
   selectedResumeFile: null,
   resumePreviewObjectUrl: "",
+  resumePreviewExpanded: false,
+  resumePreviewSnapshot: null,
+  extractionCoverageHintSource: "",
+  resumeStatusMessage: "",
+  resumeStatusError: false,
+  portfolioStatusMessage: "",
+  portfolioStatusError: false,
+  portfolioUrlDraft: "",
+  jsonEditorDraft: "",
   resultSidebarOpen: false,
   resultSidebarManual: false,
 };
@@ -736,13 +752,147 @@ const API_BASE_CANDIDATES = resolveApiBases();
 initialize();
 
 function initialize() {
+  restorePersistedState();
   buildFlow();
   bindStaticEvents();
   setInputMode(state.inputMode);
   setQuickExtractSource(state.quickExtractSource);
-  hideExtractionCoverageHint();
+  if (state.extractionCoverageHintSource) {
+    showExtractionCoverageHint(state.extractionCoverageHintSource);
+  } else {
+    hideExtractionCoverageHint();
+  }
+  restoreResumePreviewSnapshot();
+  setResumePreviewExpanded(state.resumePreviewExpanded, { skipPersist: true });
+  if (appElements.portfolioUrlInput) {
+    appElements.portfolioUrlInput.value = state.portfolioUrlDraft || "";
+  }
+  setResumeStatus(state.resumeStatusMessage || "", Boolean(state.resumeStatusError));
+  setPortfolioStatus(state.portfolioStatusMessage || "", Boolean(state.portfolioStatusError));
   updateExtractionLockUI();
   renderAll();
+
+  if (typeof window !== "undefined") {
+    window.addEventListener("beforeunload", persistAppStateNow);
+  }
+}
+
+function restorePersistedState() {
+  let parsed = null;
+
+  try {
+    const raw = localStorage.getItem(APP_STATE_STORAGE_KEY);
+    if (!raw) return;
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return;
+  }
+
+  if (!parsed || parsed.version !== APP_STATE_STORAGE_VERSION || !parsed.state) {
+    return;
+  }
+
+  const restored = parsed.state;
+  state.profile = normalizeIncomingProfile(restored.profile || cloneProfileTemplate());
+  state.answers = restored.answers && typeof restored.answers === "object" ? restored.answers : {};
+  state.answerOrder = Array.isArray(restored.answerOrder)
+    ? restored.answerOrder.filter((questionId) => Object.prototype.hasOwnProperty.call(state.answers, questionId))
+    : [];
+  state.skipped = new Set(Array.isArray(restored.skipped) ? restored.skipped : []);
+  state.path = typeof restored.path === "string" ? restored.path : "explorer";
+  state.depthMode = restored.depthMode === "deep" ? "deep" : "light";
+  state.currentIndex = Number.isInteger(restored.currentIndex) ? restored.currentIndex : 0;
+  state.hasAnsweredAtLeastOne = Object.keys(state.answers).length > 0 || Boolean(restored.hasAnsweredAtLeastOne);
+  state.viewMode = restored.viewMode === "json" ? "json" : "profile";
+  state.jsonDirty = Boolean(restored.jsonDirty);
+  state.inputMode = restored.inputMode === "extract" ? "extract" : "manual";
+  state.quickExtractSource = restored.quickExtractSource === "portfolio" ? "portfolio" : "resume";
+  state.extractionSourceLock =
+    restored.extractionSourceLock === "portfolio" || restored.extractionSourceLock === "resume"
+      ? restored.extractionSourceLock
+      : null;
+  state.resumePreviewExpanded = Boolean(restored.resumePreviewExpanded);
+  state.resumePreviewSnapshot =
+    restored.resumePreviewSnapshot && typeof restored.resumePreviewSnapshot === "object"
+      ? {
+          meta: cleanString(restored.resumePreviewSnapshot.meta),
+          text: cleanString(restored.resumePreviewSnapshot.text),
+        }
+      : null;
+  state.extractionCoverageHintSource = restored.extractionCoverageHintSource === "link" ? "link" : "";
+  if (restored.extractionCoverageHintSource === "file") {
+    state.extractionCoverageHintSource = "file";
+  }
+  state.resumeStatusMessage = cleanString(restored.resumeStatusMessage);
+  state.resumeStatusError = Boolean(restored.resumeStatusError);
+  state.portfolioStatusMessage = cleanString(restored.portfolioStatusMessage);
+  state.portfolioStatusError = Boolean(restored.portfolioStatusError);
+  state.portfolioUrlDraft = cleanString(restored.portfolioUrlDraft);
+  state.jsonEditorDraft = cleanString(restored.jsonEditorDraft);
+  state.resultSidebarOpen = Boolean(restored.resultSidebarOpen);
+  state.resultSidebarManual = Boolean(restored.resultSidebarManual);
+}
+
+function buildPersistableState() {
+  return {
+    profile: state.profile,
+    answers: state.answers,
+    answerOrder: state.answerOrder,
+    skipped: Array.from(state.skipped),
+    path: state.path,
+    depthMode: state.depthMode,
+    currentIndex: state.currentIndex,
+    hasAnsweredAtLeastOne: state.hasAnsweredAtLeastOne,
+    viewMode: state.viewMode,
+    jsonDirty: state.jsonDirty,
+    inputMode: state.inputMode,
+    quickExtractSource: state.quickExtractSource,
+    extractionSourceLock: state.extractionSourceLock,
+    resumePreviewExpanded: state.resumePreviewExpanded,
+    resumePreviewSnapshot: state.resumePreviewSnapshot,
+    extractionCoverageHintSource: state.extractionCoverageHintSource,
+    resumeStatusMessage: state.resumeStatusMessage,
+    resumeStatusError: state.resumeStatusError,
+    portfolioStatusMessage: state.portfolioStatusMessage,
+    portfolioStatusError: state.portfolioStatusError,
+    portfolioUrlDraft: state.portfolioUrlDraft,
+    jsonEditorDraft: state.jsonEditorDraft,
+    resultSidebarOpen: state.resultSidebarOpen,
+    resultSidebarManual: state.resultSidebarManual,
+  };
+}
+
+function persistAppStateNow() {
+  try {
+    const payload = {
+      version: APP_STATE_STORAGE_VERSION,
+      savedAt: new Date().toISOString(),
+      state: buildPersistableState(),
+    };
+    localStorage.setItem(APP_STATE_STORAGE_KEY, JSON.stringify(payload));
+  } catch (error) {
+    // Ignore localStorage persistence failures.
+  }
+}
+
+function schedulePersistedStateSave() {
+  if (persistStateTimer) {
+    window.clearTimeout(persistStateTimer);
+    persistStateTimer = null;
+  }
+
+  persistStateTimer = window.setTimeout(() => {
+    persistStateTimer = null;
+    persistAppStateNow();
+  }, STATE_PERSIST_DELAY_MS);
+}
+
+function clearPersistedState() {
+  try {
+    localStorage.removeItem(APP_STATE_STORAGE_KEY);
+  } catch (error) {
+    // Ignore localStorage cleanup failures.
+  }
 }
 
 function bindStaticEvents() {
@@ -760,6 +910,15 @@ function bindStaticEvents() {
     state.quickExtractSource = "resume";
     state.extractionSourceLock = null;
     state.selectedResumeFile = null;
+    state.resumePreviewExpanded = false;
+    state.resumePreviewSnapshot = null;
+    state.extractionCoverageHintSource = "";
+    state.resumeStatusMessage = "";
+    state.resumeStatusError = false;
+    state.portfolioStatusMessage = "";
+    state.portfolioStatusError = false;
+    state.portfolioUrlDraft = "";
+    state.jsonEditorDraft = "";
     state.resultSidebarOpen = false;
     state.resultSidebarManual = false;
     if (appElements.resumeFileInput) {
@@ -779,6 +938,7 @@ function bindStaticEvents() {
     setInputMode("manual");
     buildFlow();
     renderAll();
+    clearPersistedState();
   });
 
   if (appElements.selectSourceResumeBtn) {
@@ -820,6 +980,11 @@ function bindStaticEvents() {
 
   appElements.applyJsonBtn.addEventListener("click", applyJsonEdits);
   appElements.formatJsonBtn.addEventListener("click", formatJsonEditor);
+  if (appElements.copyJsonBtn) {
+    appElements.copyJsonBtn.addEventListener("click", async () => {
+      await copyJsonResponse();
+    });
+  }
   if (appElements.selectResumeBtn && appElements.resumeFileInput) {
     appElements.selectResumeBtn.addEventListener("click", () => {
       appElements.resumeFileInput.click();
@@ -827,6 +992,12 @@ function bindStaticEvents() {
 
     appElements.resumeFileInput.addEventListener("change", async (event) => {
       await handleResumeSelectionPreview(event);
+    });
+  }
+
+  if (appElements.togglePreviewSizeBtn) {
+    appElements.togglePreviewSizeBtn.addEventListener("click", () => {
+      setResumePreviewExpanded(!state.resumePreviewExpanded);
     });
   }
 
@@ -846,12 +1017,19 @@ function bindStaticEvents() {
       event.preventDefault();
       await handlePortfolioExtraction();
     });
+
+    appElements.portfolioUrlInput.addEventListener("input", () => {
+      state.portfolioUrlDraft = String(appElements.portfolioUrlInput.value || "").trim();
+      schedulePersistedStateSave();
+    });
   }
 
   appElements.jsonEditor.addEventListener("input", () => {
     state.jsonDirty = true;
+    state.jsonEditorDraft = appElements.jsonEditor.value;
     appElements.jsonStatus.textContent = "Unapplied edits in JSON.";
     appElements.jsonStatus.classList.remove("error");
+    schedulePersistedStateSave();
   });
 }
 
@@ -933,6 +1111,7 @@ function renderAll() {
   renderQuestionCard();
   renderHistory();
   renderRightPanel();
+  schedulePersistedStateSave();
 }
 
 function updateResultSidebarToggleState() {
@@ -1230,8 +1409,17 @@ function renderHumanProfile() {
 }
 
 function renderJsonEditor() {
+  if (state.jsonDirty && state.jsonEditorDraft) {
+    if (appElements.jsonEditor.value !== state.jsonEditorDraft) {
+      appElements.jsonEditor.value = state.jsonEditorDraft;
+    }
+    return;
+  }
+
   if (!state.jsonDirty) {
-    appElements.jsonEditor.value = JSON.stringify(state.profile, null, 2);
+    const formattedProfile = JSON.stringify(state.profile, null, 2);
+    appElements.jsonEditor.value = formattedProfile;
+    state.jsonEditorDraft = formattedProfile;
   }
 }
 
@@ -1250,6 +1438,7 @@ function applyJsonEdits() {
     maybeAdjustDepth(raw);
     buildFlow();
     renderAll();
+    state.jsonEditorDraft = JSON.stringify(state.profile, null, 2);
     appElements.jsonStatus.textContent = "JSON applied successfully.";
     appElements.jsonStatus.classList.remove("error");
   } catch (error) {
@@ -1262,11 +1451,85 @@ function formatJsonEditor() {
   try {
     const parsed = normalizeIncomingProfile(JSON.parse(appElements.jsonEditor.value));
     appElements.jsonEditor.value = JSON.stringify(parsed, null, 2);
+    state.jsonEditorDraft = appElements.jsonEditor.value;
     appElements.jsonStatus.textContent = "JSON formatted.";
     appElements.jsonStatus.classList.remove("error");
+    schedulePersistedStateSave();
   } catch (error) {
     appElements.jsonStatus.textContent = `Cannot format invalid JSON: ${error.message}`;
     appElements.jsonStatus.classList.add("error");
+  }
+}
+
+async function copyJsonResponse() {
+  const jsonText = String(appElements.jsonEditor.value || "").trim();
+
+  if (!jsonText) {
+    appElements.jsonStatus.textContent = "Nothing to copy yet.";
+    appElements.jsonStatus.classList.add("error");
+    return;
+  }
+
+  try {
+    await writeTextToClipboard(jsonText);
+    appElements.jsonStatus.textContent = "JSON copied to clipboard.";
+    appElements.jsonStatus.classList.remove("error");
+    setCopyJsonButtonState("success");
+  } catch (error) {
+    appElements.jsonStatus.textContent = "Could not copy JSON. Use Ctrl+C as fallback.";
+    appElements.jsonStatus.classList.add("error");
+    setCopyJsonButtonState("idle");
+  }
+}
+
+async function writeTextToClipboard(text) {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const helper = document.createElement("textarea");
+  helper.value = text;
+  helper.setAttribute("readonly", "");
+  helper.style.position = "fixed";
+  helper.style.top = "0";
+  helper.style.left = "-9999px";
+
+  document.body.appendChild(helper);
+  helper.focus();
+  helper.select();
+
+  const copied = document.execCommand("copy");
+  document.body.removeChild(helper);
+
+  if (!copied) {
+    throw new Error("Copy command failed.");
+  }
+}
+
+function setCopyJsonButtonState(status) {
+  if (!appElements.copyJsonBtn) return;
+  const defaultLabel = "Copy JSON response";
+  const copiedLabel = "JSON copied";
+
+  appElements.copyJsonBtn.classList.remove("is-copied");
+  appElements.copyJsonBtn.setAttribute("aria-label", defaultLabel);
+  appElements.copyJsonBtn.setAttribute("title", defaultLabel);
+  if (appElements.copyJsonBtn._copiedTimer) {
+    window.clearTimeout(appElements.copyJsonBtn._copiedTimer);
+    appElements.copyJsonBtn._copiedTimer = null;
+  }
+
+  if (status === "success") {
+    appElements.copyJsonBtn.classList.add("is-copied");
+    appElements.copyJsonBtn.setAttribute("aria-label", copiedLabel);
+    appElements.copyJsonBtn.setAttribute("title", copiedLabel);
+    appElements.copyJsonBtn._copiedTimer = window.setTimeout(() => {
+      appElements.copyJsonBtn.classList.remove("is-copied");
+      appElements.copyJsonBtn.setAttribute("aria-label", defaultLabel);
+      appElements.copyJsonBtn.setAttribute("title", defaultLabel);
+      appElements.copyJsonBtn._copiedTimer = null;
+    }, 1500);
   }
 }
 
@@ -1351,9 +1614,12 @@ async function handleResumeExtractionFromSelection() {
 }
 
 function setResumeStatus(message, isError = false) {
+  state.resumeStatusMessage = String(message || "");
+  state.resumeStatusError = Boolean(isError);
   if (!appElements.resumeStatus) return;
   appElements.resumeStatus.textContent = message;
   appElements.resumeStatus.classList.toggle("error", isError);
+  schedulePersistedStateSave();
 }
 
 async function renderResumePreview(file) {
@@ -1362,9 +1628,12 @@ async function renderResumePreview(file) {
   if (appElements.resumePreviewSection) {
     appElements.resumePreviewSection.classList.remove("hidden");
   }
+  setResumePreviewExpanded(state.resumePreviewExpanded, { skipPersist: true });
 
+  let previewMetaText = "";
   if (appElements.resumePreviewMeta) {
-    appElements.resumePreviewMeta.textContent = `Selected: ${file.name} (${formatFileSize(file.size)})`;
+    previewMetaText = `Selected: ${file.name} (${formatFileSize(file.size)})`;
+    appElements.resumePreviewMeta.textContent = previewMetaText;
   }
 
   const lowerName = String(file.name || "").toLowerCase();
@@ -1378,13 +1647,53 @@ async function renderResumePreview(file) {
 
   const preview = await requestResumePreview(file);
   const textPreview = String(preview.textPreview || "").trim();
+  let textPreviewValue = "";
   if (appElements.resumeTextPreview) {
     if (textPreview) {
-      appElements.resumeTextPreview.textContent = textPreview;
+      textPreviewValue = textPreview;
+      appElements.resumeTextPreview.textContent = textPreviewValue;
     } else {
-      appElements.resumeTextPreview.textContent = "Preview text was not available for this file, but extraction can still run.";
+      textPreviewValue = "Preview text was not available for this file, but extraction can still run.";
+      appElements.resumeTextPreview.textContent = textPreviewValue;
     }
     appElements.resumeTextPreview.classList.remove("hidden");
+  }
+
+  state.resumePreviewSnapshot = {
+    meta: previewMetaText,
+    text: textPreviewValue,
+  };
+  schedulePersistedStateSave();
+}
+
+function restoreResumePreviewSnapshot() {
+  if (!state.resumePreviewSnapshot || !appElements.resumePreviewSection) {
+    return;
+  }
+
+  const snapshotMeta = String(state.resumePreviewSnapshot.meta || "");
+  const snapshotText = String(state.resumePreviewSnapshot.text || "");
+  if (!snapshotMeta && !snapshotText) {
+    return;
+  }
+
+  appElements.resumePreviewSection.classList.remove("hidden");
+  if (appElements.resumePreviewMeta) {
+    appElements.resumePreviewMeta.textContent = snapshotMeta;
+  }
+
+  if (appElements.resumePdfPreview) {
+    appElements.resumePdfPreview.src = "";
+    appElements.resumePdfPreview.classList.add("hidden");
+  }
+
+  if (appElements.resumeTextPreview) {
+    appElements.resumeTextPreview.textContent = snapshotText;
+    appElements.resumeTextPreview.classList.toggle("hidden", !snapshotText);
+  }
+
+  if (!state.selectedResumeFile && !state.resumeStatusMessage) {
+    setResumeStatus("Preview restored after reload. Re-upload the file if you want to run extraction again.");
   }
 }
 
@@ -1410,6 +1719,28 @@ function clearResumePreview() {
   if (appElements.resumeTextPreview) {
     appElements.resumeTextPreview.textContent = "";
     appElements.resumeTextPreview.classList.add("hidden");
+  }
+
+  state.resumePreviewSnapshot = null;
+  schedulePersistedStateSave();
+}
+
+function setResumePreviewExpanded(isExpanded, options = {}) {
+  state.resumePreviewExpanded = Boolean(isExpanded);
+
+  if (appElements.resumePreviewSection) {
+    appElements.resumePreviewSection.classList.toggle("is-expanded", state.resumePreviewExpanded);
+  }
+
+  if (appElements.togglePreviewSizeBtn) {
+    const actionLabel = state.resumePreviewExpanded ? "Reduce preview" : "Enlarge preview";
+    appElements.togglePreviewSizeBtn.textContent = actionLabel;
+    appElements.togglePreviewSizeBtn.setAttribute("aria-expanded", String(state.resumePreviewExpanded));
+    appElements.togglePreviewSizeBtn.setAttribute("title", actionLabel);
+  }
+
+  if (!options.skipPersist) {
+    schedulePersistedStateSave();
   }
 }
 
@@ -1448,10 +1779,15 @@ async function handlePortfolioExtraction() {
   }
 
   const rawUrl = appElements.portfolioUrlInput ? appElements.portfolioUrlInput.value : "";
+  state.portfolioUrlDraft = String(rawUrl || "").trim();
   let portfolioUrl = "";
 
   try {
     portfolioUrl = normalizeWebUrl(rawUrl);
+    state.portfolioUrlDraft = portfolioUrl;
+    if (appElements.portfolioUrlInput && appElements.portfolioUrlInput.value !== portfolioUrl) {
+      appElements.portfolioUrlInput.value = portfolioUrl;
+    }
   } catch (error) {
     setPortfolioStatus(error.message, true);
     setExtractButtonState(appElements.extractPortfolioBtn, "idle");
@@ -1492,23 +1828,34 @@ async function handlePortfolioExtraction() {
 }
 
 function setPortfolioStatus(message, isError = false) {
+  state.portfolioStatusMessage = String(message || "");
+  state.portfolioStatusError = Boolean(isError);
   if (!appElements.portfolioStatus) return;
   appElements.portfolioStatus.textContent = message;
   appElements.portfolioStatus.classList.toggle("error", isError);
+  schedulePersistedStateSave();
 }
 
 function showExtractionCoverageHint(source) {
   if (!appElements.extractionCoverageHint) return;
   const sourceLabel = source === "link" ? "link" : "file";
+  state.extractionCoverageHintSource = sourceLabel;
   appElements.extractionCoverageHint.textContent =
-    `Extracted details from ${sourceLabel} successfully. We recommend switching to Fill details manually to cover any uncovered details.`;
+    `Extraction from ${sourceLabel} completed. Recommended next step: switch to Fill details manually to complete the uncovered fields now.`;
   appElements.extractionCoverageHint.classList.remove("hidden");
+  appElements.extractionCoverageHint.classList.remove("is-emphasis");
+  void appElements.extractionCoverageHint.offsetWidth;
+  appElements.extractionCoverageHint.classList.add("is-emphasis");
+  schedulePersistedStateSave();
 }
 
 function hideExtractionCoverageHint() {
   if (!appElements.extractionCoverageHint) return;
+  state.extractionCoverageHintSource = "";
   appElements.extractionCoverageHint.textContent = "";
+  appElements.extractionCoverageHint.classList.remove("is-emphasis");
   appElements.extractionCoverageHint.classList.add("hidden");
+  schedulePersistedStateSave();
 }
 
 function setInputMode(mode) {
@@ -1537,6 +1884,8 @@ function setInputMode(mode) {
         ? "Extraction mode is enabled. Import from file or link, then review answers."
         : "Manual mode keeps the interface minimal. You can switch anytime.";
   }
+
+  schedulePersistedStateSave();
 }
 
 function handleQuickSourceSelection(source) {
@@ -1576,6 +1925,8 @@ function setQuickExtractSource(source) {
   if (appElements.portfolioExtractorCard) {
     appElements.portfolioExtractorCard.classList.toggle("hidden", resumeActive);
   }
+
+  schedulePersistedStateSave();
 }
 
 function isExtractionButtonLocked(button) {
