@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <title>Adaptive Identity Capture</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main id="app" class="app" aria-live="polite">
+      <button
+        id="resultSidebarToggleBtn"
+        class="result-sidebar-toggle"
+        type="button"
+        aria-pressed="false"
+        aria-label="Open result panel"
+        title="Open result panel"
+      >
+        <span class="sidebar-icon" aria-hidden="true">
+          <span class="pane"></span>
+          <span class="pane"></span>
+        </span>
+      </button>
+
+      <section class="panel panel-left" aria-label="Conversation panel">
+        <header class="panel-header">
+          <p class="eyebrow">Adaptive Identity Session</p>
+          <h1>Extract your living Biodata</h1>
+          <p class="trust-note">
+            You stay in control: skip anything, edit anytime, delete anytime.
+          </p>
+          <div id="manualProgressWrap" class="progress-wrap" role="status">
+            <div class="progress-text">
+              <span id="progressLabel">Question 1 of 1</span>
+              <span id="pathBadge" class="badge">Path: Discovering</span>
+            </div>
+            <div class="progress-bar" aria-hidden="true">
+                <span id="progressFill"></span>
+            </div>
+        </div>
+
+        <div class="mode-switch" aria-label="Input mode selector">
+          <label for="inputModeSelect">Start with</label>
+          <select id="inputModeSelect" class="select-control mode-select">
+            <option value="manual" selected>Fill details manually</option>
+            <option value="extract">Extract from file or link</option>
+          </select>
+          <p id="inputModeHint" class="trust-note small">Manual mode keeps the interface minimal. You can switch anytime.</p>
+        </div>
+    </header>
+    
+    <section id="quickStartSection" class="resume-import hidden" aria-label="Quick start extraction">
+        <div class="resume-import-head">
+            <h2>Quick start extraction</h2>
+            <p class="trust-note small">Import from file or link and auto-fill your profile JSON.</p>
+          </div>
+
+          <div class="quick-source-select" role="radiogroup" aria-label="Quick extraction source">
+            <button
+              id="selectSourceResumeBtn"
+              class="quick-source-option active"
+              type="button"
+              role="radio"
+              aria-checked="true"
+            >
+              File
+            </button>
+            <button
+              id="selectSourcePortfolioBtn"
+              class="quick-source-option"
+              type="button"
+              role="radio"
+              aria-checked="false"
+            >
+              Link
+            </button>
+          </div>
+
+          <div class="quick-start-grid">
+            <article id="resumeExtractorCard" class="quick-start-card" aria-label="Resume extractor">
+              <h3>From file</h3>
+              <p class="trust-note small">Upload PDF, DOCX, or TXT. Extraction runs locally in your browser.</p>
+              <div class="resume-import-actions">
+                <button id="selectResumeBtn" class="ghost-btn" type="button">Choose file</button>
+                <button id="extractResumeBtn" class="ghost-btn extract-btn" type="button">
+                  <span class="btn-label">Extract details from file</span>
+                  <span class="btn-spinner" aria-hidden="true"></span>
+                  <span class="btn-check" aria-hidden="true">✓</span>
+                </button>
+                <input id="resumeFileInput" type="file" accept=".pdf,.docx,.txt" hidden />
+              </div>
+              <section id="resumePreviewSection" class="resume-preview hidden" aria-label="Selected resume preview">
+                <p id="resumePreviewMeta" class="resume-preview-meta"></p>
+                <iframe id="resumePdfPreview" class="resume-preview-frame hidden" title="Resume PDF preview"></iframe>
+                <pre id="resumeTextPreview" class="resume-preview-text hidden"></pre>
+              </section>
+              <p id="resumeStatus" class="resume-status" role="status"></p>
+            </article>
+            
+            <article id="portfolioExtractorCard" class="quick-start-card hidden" aria-label="Portfolio extractor">
+                <h3>From link</h3>
+              <p class="trust-note small">Paste your link and extract details into biodata JSON.</p>
+              <div class="portfolio-import-actions">
+                  <input
+                  id="portfolioUrlInput"
+                  class="text-control"
+                  type="url"
+                  placeholder="https://your-portfolio.com"
+                  aria-label="Portfolio URL"
+                  />
+                  <button id="extractPortfolioBtn" class="ghost-btn extract-btn" type="button">
+                      <span class="btn-label">Extract details from link</span>
+                      <span class="btn-spinner" aria-hidden="true"></span>
+                      <span class="btn-check" aria-hidden="true">✓</span>
+                    </button>
+                </div>
+                <p id="portfolioStatus" class="resume-status" role="status"></p>
+            </article>
+        </div>
+        </section>
+        
+        <section id="manualEntrySection" aria-label="Manual biodata flow">
+          <section id="questionCard" class="question-card" aria-label="Current question"></section>
+
+          <section class="history-section" aria-label="Conversation history">
+            <div class="history-header">
+              <h2>Conversation history</h2>
+              <button id="clearAllBtn" class="ghost-btn" type="button">Delete all answers</button>
+            </div>
+            <div id="historyList" class="history-list"></div>
+          </section>
+        </section>
+    </section>
+    
+    <section class="panel panel-right" aria-label="Understanding and data panel">
+        <header class="panel-header right-header">
+            <div class="toggle-group" role="tablist" aria-label="Output mode">
+            <button id="viewProfileBtn" class="toggle-btn active" role="tab" aria-selected="true" type="button">
+              Understanding View
+            </button>
+            <button id="viewJsonBtn" class="toggle-btn" role="tab" aria-selected="false" type="button">
+              View Structured Data
+            </button>
+          </div>
+          <p class="trust-note small">
+            This profile is generated from your answers. You can edit both the answers and the JSON.
+          </p>
+        </header>
+
+        <section id="profileView" class="profile-view"></section>
+
+        <section id="jsonView" class="json-view hidden" aria-label="Structured JSON editor">
+          <label for="jsonEditor">Structured JSON</label>
+          <textarea id="jsonEditor" spellcheck="false"></textarea>
+          <div class="json-actions">
+            <button id="applyJsonBtn" class="primary-btn" type="button">Apply JSON edits</button>
+            <button id="formatJsonBtn" class="ghost-btn" type="button">Format JSON</button>
+          </div>
+          <p id="jsonStatus" class="json-status" role="status"></p>
+        </section>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

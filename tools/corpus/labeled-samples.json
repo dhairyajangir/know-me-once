@@ -1,0 +1,63 @@
+[
+  {
+    "id": "resume-professional-1",
+    "sourceType": "resume",
+    "sourceLabel": "resume-professional-1.txt",
+    "text": "John Doe\nEmail: john@example.com\nPhone: +1 415 555 0123\nLinkedIn: linkedin.com/in/johndoe\nGitHub: github.com/johndoe\nPortfolio: johndoe.dev\nSkills: JavaScript, Node.js, React\nExperience: Software Engineer at Acme Corp\nEducation: B.Tech Computer Science, 2024",
+    "expected": {
+      "identity.fullName": "John Doe",
+      "identity.contact.email": "john@example.com",
+      "identity.contact.phone": "+1 415 555 0123",
+      "identity.socials.linkedin": "https://linkedin.com/in/johndoe",
+      "identity.socials.github": "https://github.com/johndoe",
+      "identity.socials.website": "https://johndoe.dev/",
+      "experience.work.currentRole": "Experience: Software Engineer at Acme Corp",
+      "experience.education.program": "Education: B.Tech Computer Science, 2024",
+      "capability.coreSkills": "Skills: JavaScript, Node.js, React",
+      "context.primaryRole": "professional"
+    }
+  },
+  {
+    "id": "resume-student-1",
+    "sourceType": "resume",
+    "sourceLabel": "resume-student-1.txt",
+    "text": "Aisha Khan\nEmail: aisha.khan@college.edu\nPhone: +91 98765 43210\nEducation: B.Tech Information Technology, Semester 6\nObjective: Seeking internship opportunities in data science\nSkills: Python, SQL, Pandas\nProjects: Built a student attendance predictor",
+    "expected": {
+      "identity.fullName": "Aisha Khan",
+      "identity.contact.email": "aisha.khan@college.edu",
+      "identity.contact.phone": "+91 98765 43210",
+      "identity.socials.website": "",
+      "experience.education.program": "Education: B.Tech Information Technology, Semester 6",
+      "capability.coreSkills": "Skills: Python, SQL, Pandas",
+      "context.primaryRole": "student"
+    }
+  },
+  {
+    "id": "portfolio-freelancer-1",
+    "sourceType": "portfolio",
+    "sourceLabel": "portfolio-freelancer-1.txt",
+    "portfolioUrl": "https://janedesign.dev",
+    "text": "Jane Design Studio\nFreelance Product Designer\nI help startups design mobile apps and design systems.\nProjects: https://janedesign.dev/projects\nCase study: https://janedesign.dev/case-study/payments\nGitHub: https://github.com/janedesign\nLinkedIn: https://linkedin.com/in/jane-design\nContact: jane@janedesign.dev",
+    "expected": {
+      "identity.contact.email": "jane@janedesign.dev",
+      "identity.socials.linkedin": "https://linkedin.com/in/jane-design",
+      "identity.socials.github": "https://github.com/janedesign",
+      "identity.socials.website": "https://janedesign.dev/",
+      "context.primaryRole": "freelancer"
+    }
+  },
+  {
+    "id": "portfolio-founder-1",
+    "sourceType": "portfolio",
+    "sourceLabel": "portfolio-founder-1.txt",
+    "portfolioUrl": "https://buildwithsam.com",
+    "text": "Sam Verma\nFounder of BuildWithSam\nWe are building workflow automation tools for small teams.\nTraction: 120 paying teams\nWebsite: buildwithsam.com\nX: https://x.com/buildwithsam\nLinkedIn: https://www.linkedin.com/in/sam-verma",
+    "expected": {
+      "identity.fullName": "Sam Verma",
+      "identity.socials.linkedin": "https://www.linkedin.com/in/sam-verma",
+      "identity.socials.twitter": "https://x.com/buildwithsam",
+      "identity.socials.website": "https://buildwithsam.com/",
+      "context.primaryRole": "founder"
+    }
+  }
+]
