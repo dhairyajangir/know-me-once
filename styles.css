@@ -272,6 +272,18 @@ h1 {
   width: fit-content;
 }
 
+.extract-coverage-hint {
+  width: fit-content;
+  max-width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #b9ddd6;
+  border-radius: 10px;
+  background: #edf9f7;
+  color: #0a5f57;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .quick-source-option {
   border: 1px solid #cfc8b8;
   border-radius: 10px;
