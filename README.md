@@ -1,135 +1,239 @@
-# Adaptive Human Model Biodata Tool
+# Adaptive Human Model - Biodata Extraction Tool
 
-A minimal, trust-driven web application that captures deep human context in one guided session and outputs a rich, structured JSON profile.
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-passing-brightgreen)
 
-This project now includes a hardened extraction pipeline with:
+A structured, trust-driven web application for capturing human context through a guided session and generating a normalized JSON profile.
 
-- deterministic signal extraction (emails, phones, URLs, social links)
-- schema-safe JSON normalization
-- private/local URL rejection for portfolio fetches
-- regression tests for critical edge cases
-- corpus-based accuracy evaluation with precision/recall/F1 reporting
+The system focuses on accuracy, speed, and deterministic extraction, with fallback to model-assisted parsing where necessary.
 
-## What this app does
+## TL;DR Quickstart
 
-- Starts with broad discovery questions.
-- Adapts question paths dynamically:
+```bash
+npm install
+echo GEMINI_API_KEY=your_key> .env
+npm run dev
+```
+
+Open `http://localhost:3000`, choose input mode, extract or fill manually, then review/edit JSON in the right panel.
+
+---
+
+## Overview
+
+This application collects user data through an adaptive question flow and supports automated extraction from resumes and portfolio URLs.
+
+It combines:
+
+- deterministic signal extraction (emails, phones, URLs)
+- schema-safe normalization
+- AI-assisted parsing (Gemini)
+- regression-tested pipelines
+- measurable accuracy via evaluation harness
+
+---
+
+## Core Features
+
+### Adaptive Question Flow
+
+- Dynamically adjusts based on user type:
   - Student
   - Working professional
   - Freelancer
   - Founder
   - Explorer / unsure
-- Uses trust-first prompts with "Why we ask this" context.
-- Supports skip logic and optional sensitive fields.
-- Includes social profile questions (LinkedIn, GitHub, website, X/Twitter, Instagram).
-- Uses Gemini AI extraction for resumes and portfolio URLs to auto-fill the JSON profile.
-- Shows one question at a time for calm conversation flow.
-- Smoothly shifts the question panel left as answers progress.
-- Reveals a right-side panel with:
-  - Human-readable understanding view
-  - Editable structured JSON view
-- Allows full user control:
-  - Edit any answer
-  - Delete any answer
-  - Edit JSON directly and re-apply
+- Depth control based on engagement level
+- Skip support for all questions
 
-## Run locally
+---
 
-This project now uses a small Node backend for AI extraction.
+### Extraction Pipeline
 
-1. Install dependencies:
-  - `npm install`
-2. Add your Gemini key in [.env](.env):
-  - `GEMINI_API_KEY=your_real_key`
-3. Start the app server:
-  - `npm run dev`
-4. Open:
-  - `http://localhost:3000`
-5. Optional quick-start import:
-  - Use selector: "Fill details manually" or "Extract from resume or portfolio"
-  - Resume: click "Choose resume file" to preview it, then click "Extract details from resume".
-  - Portfolio: paste URL and click "Extract details from portfolio".
-  - To avoid JSON clutter, once one extraction source is used, the other source is locked until you click "Delete all answers".
-6. Continue answering and refining questions.
-7. Use the right panel to review profile or structured JSON.
+- Resume parsing (text-based)
+- Portfolio URL scraping (server-side)
+- Deterministic extraction:
+  - Emails
+  - Phone numbers
+  - URLs
+  - Social links
+- AI-assisted structuring using Gemini
+- Heuristic fallback if model is unavailable
 
-## Scripts
+---
 
-Use these scripts during development:
+### Data Integrity
 
-- npm run dev
-- npm run start
-- npm test
-- npm run test:regression
-- npm run harness
-- npm run harness:tune
+- Schema-safe JSON normalization
+- Malformed JSON recovery
+- Private/local URL rejection
+- Controlled merge of extracted + user-provided data
 
-## Regression tests
+---
 
-Run the regression suite for extraction edge cases:
+### User Control
+
+- Edit or delete any answer
+- Direct JSON editing
+- Re-apply structured data
+- Dual view:
+  - Human-readable profile
+  - Raw JSON structure
+
+---
+
+## System Architecture
+
+| Layer | Responsibility |
+| --- | --- |
+| Frontend | Guided UI, adaptive questioning |
+| Backend (Node.js) | Extraction, validation, AI calls |
+| Extraction Engine | Heuristic + model blending |
+| Validation Layer | Schema enforcement |
+| Testing Layer | Regression + accuracy evaluation |
+
+---
+
+## Installation
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Configure environment
+
+Create a `.env` file:
+
+```env
+GEMINI_API_KEY=your_key
+```
+
+### 3. Start the server
+
+```bash
+npm run dev
+```
+
+### 4. Access the app
+
+```text
+http://localhost:3000
+```
+
+---
+
+## Usage
+
+1. Select input method:
+   - Manual entry
+   - Resume upload
+   - Portfolio URL
+2. Run extraction (if applicable)
+3. Complete guided questions
+4. Review and refine:
+   - Profile view
+   - JSON output
+
+Note:
+
+- Only one extraction source can be active at a time
+- Reset using Delete all answers
+
+---
+
+## Available Scripts
+
+| Command | Description |
+| --- | --- |
+| `npm run dev` | Start development server |
+| `npm start` | Start production server |
+| `npm test` | Run all tests |
+| `npm run test:regression` | Run regression tests |
+| `npm run harness` | Run accuracy evaluation |
+| `npm run harness:tune` | Run tuning mode |
+
+---
+
+## Backend API
+
+| Method | Endpoint | Purpose | Request Body | Success Response |
+| --- | --- | --- | --- | --- |
+| `GET` | `/api/health` | Service health check | None | `{ ok, model }` |
+| `POST` | `/api/preview/resume` | Extract preview text from uploaded resume | `multipart/form-data` with `resume` file | `{ fileName, mimeType, size, textPreview, truncated }` |
+| `POST` | `/api/extract/resume` | Extract structured profile from resume | `multipart/form-data` with `resume` file | `{ profile, source, model, extractionMode, cached, latencyMs }` |
+| `POST` | `/api/extract/portfolio` | Extract structured profile from portfolio URL | JSON: `{ "url": "https://..." }` | `{ profile, source, model, extractionMode, cached, latencyMs }` |
+
+Common error response:
+
+```json
+{ "error": "human-readable message" }
+```
+
+---
+
+## Regression Testing
+
+Run:
 
 ```bash
 npm run test:regression
 ```
 
-Current regression coverage includes:
+Coverage includes:
 
-- URL extraction false positives from email domains and abbreviations
-- malformed JSON edit handling
-- private/local URL rejection
-- model JSON parse recovery for fenced/trailing-comma outputs
+- URL extraction false positives
+- JSON parsing failures
+- Private/local URL filtering
+- Model output inconsistencies
 
-Run all tests:
+---
 
-```bash
-npm test
-```
+## Accuracy Evaluation
 
-## Accuracy harness
-
-Run corpus-based field evaluation (precision/recall/F1):
+Run:
 
 ```bash
 npm run harness
 ```
 
-Run tuning mode (heuristic/model blend + prompt signal weight):
+Metrics:
+
+- Precision
+- Recall
+- F1 Score
+
+### Tuning Mode
 
 ```bash
 npm run harness:tune
 ```
 
-Note:
+- Enables heuristic + model blending
+- Requires valid `GEMINI_API_KEY`
+- Falls back to heuristic-only evaluation if unavailable
 
-- harness:tune uses --with-model, so model blending only occurs when GEMINI_API_KEY is set and reachable.
-- if model extraction is unavailable, the harness gracefully evaluates heuristic mode and still produces a report.
+### Optional Flags
 
-Optional flags:
+| Flag | Description |
+| --- | --- |
+| `--corpus` | Custom dataset path |
+| `--out` | Output report path |
+| `--fields` | Evaluate specific fields |
 
-- --corpus <path> custom labeled corpus JSON
-- --out <path> output report path (default: .reports/accuracy-report.json)
-- --fields a,b,c evaluate only selected field paths
-
-Example:
+### Example
 
 ```bash
-node tools/accuracy-harness.js --corpus tools/corpus/labeled-samples.json --fields identity.contact.email,identity.socials.linkedin
+node tools/accuracy-harness.js \
+--corpus tools/corpus/labeled-samples.json \
+--fields identity.contact.email,identity.socials.linkedin
 ```
 
-Corpus examples live in tools/corpus/labeled-samples.json.
+---
 
-### Corpus format
-
-Each sample in the corpus is a JSON object with:
-
-- id: unique sample id
-- sourceType: resume or portfolio
-- sourceLabel: label for traceability
-- text: raw source text used for extraction
-- portfolioUrl: optional, typically set for portfolio samples
-- expected: map of field path to expected value
-
-Minimal sample:
+## Corpus Format
 
 ```json
 {
@@ -144,83 +248,95 @@ Minimal sample:
 }
 ```
 
-### Accuracy report output
+---
 
-The harness writes a JSON report to .reports/accuracy-report.json that includes:
+## Output Report
 
-- bestConfig
-- summary.micro (precision, recall, f1)
-- summary.macroF1
-- perField metrics and error counts
-- sampleResults with mismatch details
+Generated at:
 
-Use lowest-performing fields to prioritize extractor and prompt tuning.
+```text
+.reports/accuracy-report.json
+```
 
-## Data model generated
+Includes:
 
-The output is a deep profile object with layers:
+- Best configuration
+- Micro metrics (precision, recall, F1)
+- Macro F1
+- Per-field performance
+- Error analysis
+- Sample mismatches
 
-- identity
-- capability
-- experience
-- intent
-- behavior
-- preferences
-- context
-- meta
+---
 
-## Adaptive behavior implemented
+## Data Model
 
-- Dynamic path classification from current focus + selected role.
-- Path-specific follow-ups (student/professional/freelancer/founder/explorer).
-- Depth control:
-  - Engaged, detailed answers trigger deeper questions.
-  - Signals like "quick" or "tired" keep session lightweight.
-- Skip support for any question.
+```text
+identity
+capability
+experience
+intent
+behavior
+preferences
+context
+meta
+```
 
-## Example user journeys
+---
 
-### Journey A: Student
+## Adaptive Logic
 
-Input signal:
-- "I am a 2nd year BTech student preparing for internships"
+The system adjusts questioning based on:
 
-System adapts to ask:
-- Program and year
-- Student projects
-- Active skills
-- Internship target
-- Learning style (if depth increases)
+- user role classification
+- response depth
+- engagement signals
 
-### Journey B: Working professional
+### Example Flows
 
-Input signal:
-- "I am working as a data analyst and preparing for a senior role"
+Student:
 
-System adapts to ask:
-- Current role
-- Years of experience
-- Recent impact
-- Next career move
-- Leadership/collaboration style (if depth increases)
+- academic details
+- projects
+- skills
+- internship goals
 
-### Journey C: Explorer / unsure
+Professional:
 
-Input signal:
-- "I am not sure yet, exploring options"
+- role and experience
+- impact
+- career progression
+- leadership signals
 
-System adapts to ask:
-- Curiosity areas
-- Current experiments
-- Direction blockers
-- One-month progress target
-- Preferred support mode
+Explorer:
+
+- interests
+- experiments
+- blockers
+- short-term direction
+
+---
 
 ## Notes
 
-- Sensitive details like phone, email, and date of birth are optional.
-- AI extraction requires a running backend server and valid Gemini API key in `.env`.
-- Resume text is parsed on the server and sent to Gemini for structured extraction.
-- Portfolio extraction fetches page content server-side and sends condensed text to Gemini.
-- Extraction falls back to heuristic mode if the model is unavailable or times out.
-- Profile data is still stored in-memory in the browser session.
+- Sensitive fields are optional
+- Resume parsing is server-side
+- Portfolio extraction is sanitized before processing
+- AI extraction requires backend + API key
+- Heuristic fallback ensures partial functionality without AI
+
+---
+
+## Limitations
+
+- No persistent storage (session-based)
+- Extraction quality depends on input quality
+- Portfolio parsing varies across websites
+
+---
+
+## License
+
+This project is licensed under the MIT License.
+
+See the [LICENSE](LICENSE) file for full text.
